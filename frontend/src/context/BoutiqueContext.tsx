@@ -1,64 +1,12 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { Product, CartItem, ActivityLog, ViewMode, MobileView } from '../types';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import type { ReactNode } from 'react';
+import type { Product, CartItem, RawCartItem, ActivityLog } from '../types';
 import { INITIAL_PRODUCTS } from '../data/mockProducts';
+import { calculateDiscountedPrice } from '../utils/pricing';
+import { BoutiqueContext } from './boutiqueContextInstance';
+import type { ToastInfo } from './boutiqueContextInstance';
 
-interface ToastInfo {
-  id: string;
-  message: string;
-  type: 'success' | 'info' | 'sale';
-}
-
-interface BoutiqueContextType {
-  products: Product[];
-  cart: CartItem[];
-  isCartOpen: boolean;
-  activityLogs: ActivityLog[];
-  viewMode: ViewMode;
-  mobileView: MobileView;
-  lastUpdatedProductId: string | null;
-  activeSaleNotice: string | null;
-  toasts: ToastInfo[];
-  
-  // Calculations
-  cartCount: number;
-  cartTotal: number;
-  cartOriginalTotal: number;
-  cartSavings: number;
-  activeDiscountCount: number;
-  
-  // Product & Admin Operations
-  updateBasePrice: (id: string, newPrice: number) => void;
-  updateDiscount: (id: string, discountPercentage: number) => void;
-  applyStorewideDiscount: (discountPercentage: number) => void;
-  resetAllDiscounts: () => void;
-  toggleStock: (id: string) => void;
-  addProduct: (product: Omit<Product, 'id'>) => void;
-  deleteProduct: (id: string) => void;
-  resetCatalog: () => void;
-
-  // Cart Operations
-  addToCart: (product: Product, size?: string) => void;
-  removeFromCart: (productId: string, size: string) => void;
-  updateCartQuantity: (productId: string, size: string, quantity: number) => void;
-  clearCart: () => void;
-  setIsCartOpen: (open: boolean) => void;
-
-  // UI View Controls
-  setViewMode: (mode: ViewMode) => void;
-  setMobileView: (view: MobileView) => void;
-  showToast: (message: string, type?: 'success' | 'info' | 'sale') => void;
-  dismissToast: (id: string) => void;
-}
-
-const BoutiqueContext = createContext<BoutiqueContextType | undefined>(undefined);
-
-export const calculateDiscountedPrice = (basePrice: number, discountPercentage: number): number => {
-  if (!discountPercentage || discountPercentage <= 0) return basePrice;
-  const discounted = basePrice * (1 - discountPercentage / 100);
-  return Math.round(discounted);
-};
-
-export const BoutiqueProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+export const BoutiqueProvider = ({ children }: { children: ReactNode }) => {
   // Load products from localStorage if available, or fall back to INITIAL_PRODUCTS
   const [products, setProducts] = useState<Product[]>(() => {
     try {
@@ -72,9 +20,9 @@ export const BoutiqueProvider: React.FC<{ children: ReactNode }> = ({ children }
     return INITIAL_PRODUCTS;
   });
 
-  const [cart, setCart] = useState<CartItem[]>(() => {
+  const [rawCart, setRawCart] = useState<RawCartItem[]>(() => {
     try {
-      const saved = localStorage.getItem('classy_tailors_cart');
+      const saved = localStorage.getItem('classy_tailors_cart_v2');
       if (saved) {
         return JSON.parse(saved);
       }
@@ -85,8 +33,8 @@ export const BoutiqueProvider: React.FC<{ children: ReactNode }> = ({ children }
   });
 
   const [isCartOpen, setIsCartOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>('split');
-  const [mobileView, setMobileView] = useState<MobileView>('storefront');
+  const [viewMode, setViewMode] = useState<'split' | 'storefront' | 'admin'>('split');
+  const [mobileView, setMobileView] = useState<'storefront' | 'admin'>('storefront');
   const [lastUpdatedProductId, setLastUpdatedProductId] = useState<string | null>(null);
   const [activeSaleNotice, setActiveSaleNotice] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastInfo[]>([]);
@@ -98,6 +46,15 @@ export const BoutiqueProvider: React.FC<{ children: ReactNode }> = ({ children }
       type: 'system'
     }
   ]);
+
+  // Derive cart items dynamically from rawCart and current products
+  const cart: CartItem[] = useMemo(() => {
+    return rawCart.flatMap((item) => {
+      const product = products.find((p) => p.id === item.productId);
+      if (!product) return [];
+      return [{ product, quantity: item.quantity, size: item.size }];
+    });
+  }, [rawCart, products]);
 
   // Persist products to localStorage
   useEffect(() => {
@@ -111,24 +68,11 @@ export const BoutiqueProvider: React.FC<{ children: ReactNode }> = ({ children }
   // Persist cart to localStorage
   useEffect(() => {
     try {
-      localStorage.setItem('classy_tailors_cart', JSON.stringify(cart));
+      localStorage.setItem('classy_tailors_cart_v2', JSON.stringify(rawCart));
     } catch (e) {
       console.error(e);
     }
-  }, [cart]);
-
-  // Keep cart items updated when products price/discount change
-  useEffect(() => {
-    setCart((prevCart) =>
-      prevCart.map((item) => {
-        const matchingProduct = products.find((p) => p.id === item.product.id);
-        if (matchingProduct) {
-          return { ...item, product: matchingProduct };
-        }
-        return item;
-      })
-    );
-  }, [products]);
+  }, [rawCart]);
 
   const addLog = useCallback((message: string, type: ActivityLog['type']) => {
     const newLog: ActivityLog = {
@@ -137,7 +81,7 @@ export const BoutiqueProvider: React.FC<{ children: ReactNode }> = ({ children }
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       type,
     };
-    setActivityLogs((prev) => [newLog, ...prev.slice(0, 49)]); // Keep last 50 logs
+    setActivityLogs((prev) => [newLog, ...prev.slice(0, 49)]);
   }, []);
 
   const showToast = useCallback((message: string, type: 'success' | 'info' | 'sale' = 'info') => {
@@ -257,7 +201,7 @@ export const BoutiqueProvider: React.FC<{ children: ReactNode }> = ({ children }
   const deleteProduct = useCallback((id: string) => {
     const prod = products.find((p) => p.id === id);
     setProducts((prev) => prev.filter((p) => p.id !== id));
-    setCart((prev) => prev.filter((item) => item.product.id !== id));
+    setRawCart((prev) => prev.filter((item) => item.productId !== id));
     addLog(`Removed "${prod ? prod.name : id}" from catalog`, 'product');
     showToast(`Product removed from boutique catalog`, 'info');
   }, [products, addLog, showToast]);
@@ -272,9 +216,9 @@ export const BoutiqueProvider: React.FC<{ children: ReactNode }> = ({ children }
 
   // Cart Operations
   const addToCart = useCallback((product: Product, size: string = '40R / M') => {
-    setCart((prev) => {
+    setRawCart((prev) => {
       const existingIndex = prev.findIndex(
-        (item) => item.product.id === product.id && item.size === size
+        (item) => item.productId === product.id && item.size === size
       );
       if (existingIndex > -1) {
         const updated = [...prev];
@@ -284,15 +228,15 @@ export const BoutiqueProvider: React.FC<{ children: ReactNode }> = ({ children }
         };
         return updated;
       } else {
-        return [...prev, { product, quantity: 1, size }];
+        return [...prev, { productId: product.id, quantity: 1, size }];
       }
     });
     showToast(`Added "${product.name}" (${size}) to shopping bag`, 'success');
   }, [showToast]);
 
   const removeFromCart = useCallback((productId: string, size: string) => {
-    setCart((prev) =>
-      prev.filter((item) => !(item.product.id === productId && item.size === size))
+    setRawCart((prev) =>
+      prev.filter((item) => !(item.productId === productId && item.size === size))
     );
   }, []);
 
@@ -301,9 +245,9 @@ export const BoutiqueProvider: React.FC<{ children: ReactNode }> = ({ children }
       removeFromCart(productId, size);
       return;
     }
-    setCart((prev) =>
+    setRawCart((prev) =>
       prev.map((item) => {
-        if (item.product.id === productId && item.size === size) {
+        if (item.productId === productId && item.size === size) {
           return { ...item, quantity };
         }
         return item;
@@ -312,7 +256,7 @@ export const BoutiqueProvider: React.FC<{ children: ReactNode }> = ({ children }
   }, [removeFromCart]);
 
   const clearCart = useCallback(() => {
-    setCart([]);
+    setRawCart([]);
   }, []);
 
   // Calculated totals
@@ -374,12 +318,4 @@ export const BoutiqueProvider: React.FC<{ children: ReactNode }> = ({ children }
       {children}
     </BoutiqueContext.Provider>
   );
-};
-
-export const useBoutique = () => {
-  const context = useContext(BoutiqueContext);
-  if (!context) {
-    throw new Error('useBoutique must be used within a BoutiqueProvider');
-  }
-  return context;
 };

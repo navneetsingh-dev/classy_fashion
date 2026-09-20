@@ -1,8 +1,7 @@
-import React from 'react';
-import { useBoutique } from '../context/BoutiqueContext';
+import { useBoutique } from '../context';
 import { CheckCircle2, AlertCircle, Sparkles, X } from 'lucide-react';
 
-export const ToastContainer: React.FC = () => {
+export const ToastContainer = () => {
   const { toasts, dismissToast } = useBoutique();
 
   if (toasts.length === 0) return null;

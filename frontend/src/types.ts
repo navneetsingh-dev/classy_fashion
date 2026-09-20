@@ -17,6 +17,12 @@ export interface CartItem {
   size: string;
 }
 
+export interface RawCartItem {
+  productId: string;
+  quantity: number;
+  size: string;
+}
+
 export interface ActivityLog {
   id: string;
   message: string;
